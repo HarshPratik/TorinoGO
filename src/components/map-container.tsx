@@ -13,38 +13,20 @@ import {
 import type { Map as LeafletMap } from 'leaflet'; // Import Leaflet's Map type
 import L from 'leaflet'; // Import Leaflet library
 import type { GTFSStop, Location } from '@/services/gtt';
-import { getNearbyStops, calculateDistance } from '@/services/gtt'; // Use calculateDistance from gtt
+import { getNearbyStops, calculateDistance, getRealTimeArrivals } from '@/services/gtt'; // Use calculateDistance from gtt
 import { Button } from '@/components/ui/button';
 import { LocateFixed, Bus } from 'lucide-react';
 import { StopDetailSheet } from '@/components/stop-detail-sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useToast } from "@/hooks/use-toast";
+
 
 // Turin center coordinates
 const DEFAULT_CENTER: L.LatLngExpression = [45.0703, 7.6869]; // Use Leaflet's LatLngExpression
 const DEFAULT_ZOOM = 14;
 const NEARBY_RADIUS_METERS = 1000; // Fetch stops within 1km
 
-// Fix default icon issue with Leaflet and Webpack
-import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
-import iconUrl from 'leaflet/dist/images/marker-icon.png';
-import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
-
-const DefaultIcon = L.icon({
-  iconRetinaUrl: iconRetinaUrl.src,
-  iconUrl: iconUrl.src,
-  shadowUrl: shadowUrl.src,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  tooltipAnchor: [16, -28],
-  shadowSize: [41, 41],
-});
-
-// Apply the default icon globally for Marker components
-// Check if running in a browser environment before modifying prototype
-if (typeof window !== 'undefined') {
-    L.Marker.prototype.options.icon = DefaultIcon;
-}
+// Removed global icon modification - explicit icons are used for markers below.
 
 
 // Inner component to access map instance via hooks
@@ -96,12 +78,16 @@ export function MapContainer() {
   const [hasFetchedInitialStops, setHasFetchedInitialStops] = useState(false); // Track initial fetch
 
   const mapRef = useRef<LeafletMap>(null); // Ref to access map instance if needed
+  const { toast } = useToast();
 
   // Get user's current location
   useEffect(() => {
+    let isMounted = true; // Track if component is still mounted
+
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          if (!isMounted) return;
           const location = L.latLng( // Use L.latLng
             position.coords.latitude,
             position.coords.longitude
@@ -114,6 +100,7 @@ export function MapContainer() {
           setError(null);
         },
         (err) => {
+           if (!isMounted) return;
           console.warn(`ERROR(${err.code}): ${err.message}`);
           setError('Unable to retrieve location. Showing default view.');
           // Keep default center if location fails, trigger initial fetch
@@ -124,12 +111,17 @@ export function MapContainer() {
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // Increased timeout
       );
     } else {
+      if (!isMounted) return;
       setError('Geolocation is not supported by this browser.');
       // Keep default center if geolocation not supported, trigger initial fetch
        if (!hasFetchedInitialStops) {
            fetchStops(currentCenter); // Fetch for default center
        }
     }
+
+    return () => {
+        isMounted = false; // Cleanup function to set mounted status to false
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run only once on mount
 
@@ -153,6 +145,11 @@ export function MapContainer() {
          console.error('Error fetching stops:', fetchError);
          setError('Failed to load public transport stops.');
          setStops([]); // Clear stops on error
+          toast({
+              title: "Error",
+              description: "Failed to load nearby stops.",
+              variant: "destructive",
+          });
        } finally {
          setLoadingStops(false);
        }
@@ -187,6 +184,8 @@ export function MapContainer() {
   };
 
   const handleRecenter = () => {
+     let isMounted = true; // Track mount status for async operation
+
     if (userLocation) {
        const zoom = Math.max(currentZoom, DEFAULT_ZOOM + 2); // Use current or zoomed-in level
        setCurrentCenter(userLocation); // This will trigger the useEffect to fly to the location
@@ -197,6 +196,7 @@ export function MapContainer() {
         setError("Getting your location...");
       navigator.geolocation.getCurrentPosition(
         (position) => {
+          if (!isMounted) return;
           const location = L.latLng(
             position.coords.latitude,
             position.coords.longitude
@@ -208,13 +208,24 @@ export function MapContainer() {
           setLoadingStops(false);
         },
         (err) => {
+          if (!isMounted) return;
           console.warn(`ERROR(${err.code}): ${err.message}`);
           setError('Unable to retrieve your location.');
           setLoadingStops(false);
+          toast({
+                title: "Location Error",
+                description: "Could not get your current location.",
+                variant: "destructive",
+           });
         },
          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     }
+      // Cleanup function for the specific async operation
+     // This immediate return might not be standard for Promises but illustrates the concept
+     // A better approach might involve AbortController if the Geolocation API supports it
+     // or managing state more carefully based on mount status.
+     // return () => { isMounted = false; };
   };
 
    const handleCenterChange = (newCenter: L.LatLng) => {
@@ -226,7 +237,10 @@ export function MapContainer() {
        );
         console.log(`Map moved by ${distance.toFixed(0)}m`);
        // Update if map moved more than ~200m to avoid excessive refetches
-       if (distance > 200) {
+       // Also check if the new center is significantly different to avoid updates on tiny drifts
+       const latDiff = Math.abs(currentCenter.lat - newCenter.lat);
+       const lngDiff = Math.abs(currentCenter.lng - newCenter.lng);
+       if (distance > 200 || latDiff > 0.001 || lngDiff > 0.001) {
             console.log("Significant move detected, updating center state.");
            setCurrentCenter(newCenter);
        }
@@ -304,8 +318,8 @@ export function MapContainer() {
 
   return (
     <div className="relative h-full w-full">
-      {/* Ensure LeafletMapContainer only renders when L is available */}
-      {typeof L !== 'undefined' ? (
+      {/* Ensure LeafletMapContainer only renders when L is available and component is mounted */}
+      {typeof window !== 'undefined' && L ? (
           <LeafletMapContainer
               // Use key to force re-render if center changes drastically? No, use MapController.
               center={DEFAULT_CENTER} // Initial center, MapController handles updates
@@ -348,16 +362,16 @@ export function MapContainer() {
                   </div>
               )}
 
-              {/* Error Message */}
-              {error && !error.startsWith("Getting") && ( // Don't show location fetching as error
+              {/* Error Message - Handled by Toasts now */}
+              {/* {error && !error.startsWith("Getting") && ( // Don't show location fetching as error
                   <div className="absolute top-4 left-1/2 z-[1001] -translate-x-1/2 transform rounded bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground shadow-lg">
                       {error}
                   </div>
-              )}
+              )} */}
 
           </LeafletMapContainer>
       ) : (
-          <Skeleton className="h-full w-full" /> // Show skeleton if Leaflet not ready
+          <Skeleton className="h-full w-full" /> // Show skeleton if Leaflet not ready or not mounted yet
       )}
 
 

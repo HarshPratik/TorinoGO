@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -13,11 +14,12 @@ import {
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Star, MapPin, Navigation } from 'lucide-react';
+import { Star, MapPin, Navigation, RefreshCw } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { formatDistanceToNow, parseISO } from 'date-fns';
+import { useToast } from "@/hooks/use-toast"; // Import useToast
 
 interface StopDetailSheetProps {
   stop: GTFSStop | null;
@@ -29,13 +31,34 @@ interface StopDetailSheetProps {
 const formatArrivalTime = (isoTimeString: string, delaySeconds: number): string => {
     try {
         const scheduledArrival = parseISO(isoTimeString);
+        // Avoid invalid dates if parsing fails
+        if (isNaN(scheduledArrival.getTime())) {
+            console.warn("Invalid date string received:", isoTimeString);
+            return "Invalid time";
+        }
         const estimatedArrival = new Date(scheduledArrival.getTime() + delaySeconds * 1000);
+        const now = new Date();
+
+        // If arrival is in the past, show "Arrived" or "Departed"
+        if (estimatedArrival < now) {
+            // Check if it was very recent (e.g., last minute)
+            const minutesAgo = (now.getTime() - estimatedArrival.getTime()) / 60000;
+            if (minutesAgo < 1) {
+                return "Arriving now";
+            }
+            return "Departed"; // Or "Arrived" if more appropriate
+        }
+
         const distance = formatDistanceToNow(estimatedArrival, { addSuffix: true });
-        // Make it more concise, e.g., "in 5 min" -> "5 min"
-        return distance.replace('in ', '').replace('about ', '');
+        // Make it more concise, e.g., "in 5 min" -> "5 min", "less than a minute" -> "< 1 min"
+        return distance
+            .replace('in about ', '')
+            .replace('in ', '')
+            .replace('about ', '')
+            .replace('less than a minute', '< 1 min');
     } catch (e) {
-        console.error("Error parsing date:", isoTimeString, e);
-        return "Invalid time";
+        console.error("Error formatting arrival time:", isoTimeString, e);
+        return "Error";
     }
 };
 
@@ -45,134 +68,188 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
   const [loadingArrivals, setLoadingArrivals] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isFavorite, setIsFavorite] = useState(false); // Placeholder state
+  const { toast } = useToast(); // Get toast function
 
-  useEffect(() => {
-    async function fetchArrivals() {
-      if (!stop || !isOpen) return;
-      setLoadingArrivals(true);
+  const fetchArrivals = async (showLoading = true) => {
+      if (!stop) return;
+      if (showLoading) setLoadingArrivals(true);
       setError(null);
-      setArrivals([]); // Clear previous arrivals
+      // Don't clear arrivals immediately for refresh, makes UI jumpy
+      // setArrivals([]);
       try {
         const fetchedArrivals = await getRealTimeArrivals(stop.stopId);
         // Sort arrivals by estimated time
         fetchedArrivals.sort((a, b) => {
-            const timeA = new Date(parseISO(a.arrivalTime).getTime() + a.delay * 1000);
-            const timeB = new Date(parseISO(b.arrivalTime).getTime() + b.delay * 1000);
-            return timeA.getTime() - timeB.getTime();
+            try {
+                const timeA = new Date(parseISO(a.arrivalTime).getTime() + a.delay * 1000);
+                const timeB = new Date(parseISO(b.arrivalTime).getTime() + b.delay * 1000);
+                return timeA.getTime() - timeB.getTime();
+            } catch (e) {
+                // Handle potential invalid dates during sorting
+                console.error("Error parsing date during sort:", e);
+                return 0; // Maintain original order if parsing fails
+            }
         });
         setArrivals(fetchedArrivals);
+        if (!showLoading) { // Only show success toast on manual refresh
+             toast({
+               title: "Arrivals Updated",
+               description: `Fetched latest times for ${stop.stopName}.`,
+             });
+        }
       } catch (fetchError) {
         console.error('Error fetching real-time arrivals:', fetchError);
         setError('Failed to load real-time arrivals.');
+        setArrivals([]); // Clear arrivals on error
+        toast({ // Show error toast
+           title: "Error",
+           description: "Could not fetch real-time arrivals.",
+           variant: "destructive",
+         });
       } finally {
-        setLoadingArrivals(false);
+        if (showLoading) setLoadingArrivals(false);
       }
-    }
+    };
 
+
+  useEffect(() => {
     if (isOpen && stop) {
-      fetchArrivals();
-      // Check if stop is favorite (replace with actual logic later)
-      // For now, randomly set favorite status for demo
-      setIsFavorite(Math.random() > 0.7);
+      fetchArrivals(true); // Fetch with loading indicator on open
+      // TODO: Check if stop is favorite (replace with actual logic later)
+      // This should ideally come from a user data store (e.g., Firebase)
+      // const userFavorites = getUserFavorites(); // Hypothetical function
+      // setIsFavorite(userFavorites.includes(stop.stopId));
+      setIsFavorite(Math.random() > 0.7); // Random demo state
     }
-  }, [stop, isOpen]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stop, isOpen]); // Rerun when stop changes or sheet opens
+
 
   const handleFavoriteToggle = () => {
     // TODO: Implement actual favorite saving logic (Firebase)
-    setIsFavorite(!isFavorite);
-    console.log('Favorite toggled for stop:', stop?.stopId, !isFavorite);
-    // Add toast notification later
+    const newFavoriteState = !isFavorite;
+    setIsFavorite(newFavoriteState);
+    // Simulate saving to backend/local storage
+    console.log('Favorite toggled for stop:', stop?.stopId, newFavoriteState);
+    // Add toast notification
+     toast({
+       title: newFavoriteState ? "Added to Favorites" : "Removed from Favorites",
+       description: `${stop?.stopName} ${newFavoriteState ? 'saved.' : 'removed.'}`,
+     });
   };
 
   const handleSetOrigin = () => {
-    // TODO: Implement route planning integration
+    // TODO: Implement route planning integration (pass stop data to parent/context)
     console.log('Set as Origin:', stop?.stopName);
+    toast({
+        title: "Origin Set",
+        description: `${stop?.stopName} selected as starting point.`,
+    });
     onClose(); // Close sheet after selection
-     // Add toast notification later
   };
 
   const handleSetDestination = () => {
-    // TODO: Implement route planning integration
+    // TODO: Implement route planning integration (pass stop data to parent/context)
     console.log('Set as Destination:', stop?.stopName);
+     toast({
+        title: "Destination Set",
+        description: `${stop?.stopName} selected as destination.`,
+    });
     onClose(); // Close sheet after selection
-     // Add toast notification later
+  };
+
+  const handleRefresh = () => {
+      fetchArrivals(false); // Fetch without main loading indicator, show toast on completion/error
   };
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="rounded-t-lg max-h-[75vh] flex flex-col">
+      <SheetContent side="bottom" className="rounded-t-lg max-h-[75vh] flex flex-col p-0">
         {stop ? (
           <>
-            <SheetHeader className="px-4 pt-4 pb-2 text-left">
-              <div className="flex justify-between items-start">
-                  <div>
+            <SheetHeader className="px-4 pt-4 pb-2 text-left sticky top-0 bg-background z-10">
+              <div className="flex justify-between items-start gap-2">
+                  <div className="flex-1">
                     <SheetTitle className="text-xl">{stop.stopName}</SheetTitle>
                     <SheetDescription>Stop ID: {stop.stopId}</SheetDescription>
                   </div>
-                  <Button
-                     variant={isFavorite ? "secondary" : "ghost"}
-                     size="icon"
-                     onClick={handleFavoriteToggle}
-                     className={`transition-colors ${isFavorite ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
-                     aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
-                   >
-                    <Star fill={isFavorite ? "currentColor" : "none"} size={20} />
-                   </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                         variant="ghost"
+                         size="icon"
+                         onClick={handleRefresh}
+                         className="text-muted-foreground hover:text-foreground"
+                         aria-label="Refresh arrivals"
+                         disabled={loadingArrivals}
+                     >
+                         <RefreshCw size={18} className={loadingArrivals ? 'animate-spin' : ''} />
+                     </Button>
+                     <Button
+                         variant={isFavorite ? "secondary" : "ghost"}
+                         size="icon"
+                         onClick={handleFavoriteToggle}
+                         className={`transition-colors ${isFavorite ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+                         aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                     >
+                         <Star fill={isFavorite ? "currentColor" : "none"} size={20} />
+                     </Button>
+                   </div>
               </div>
             </SheetHeader>
-            <Separator className="my-2" />
+            <Separator className="mb-0" />
             <ScrollArea className="flex-grow px-4 pb-2">
-              <h3 className="mb-2 text-lg font-semibold">Upcoming Arrivals</h3>
+              <h3 className="mb-2 text-lg font-semibold pt-3">Upcoming Arrivals</h3>
               {loadingArrivals ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-8 w-full" />
-                  <Skeleton className="h-8 w-full" />
-                  <Skeleton className="h-8 w-2/3" />
+                <div className="space-y-3 py-2">
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-5/6" />
                 </div>
               ) : error ? (
-                <p className="text-destructive">{error}</p>
+                <p className="text-destructive py-4">{error}</p>
               ) : arrivals.length > 0 ? (
-                <ul className="space-y-2">
+                <ul className="space-y-1 py-2">
                   {arrivals.map((arrival, index) => (
-                    <li key={`${arrival.tripId}-${index}`} className="flex items-center justify-between py-1 border-b border-dashed">
-                      <div className="flex items-center gap-2">
-                         <Badge variant="outline" className="font-mono text-sm w-12 justify-center">
-                           {/* Placeholder Line Number - replace with actual data */}
-                           {arrival.tripId.substring(0,3)}
+                    <li key={`${arrival.tripId}-${index}-${arrival.arrivalTime}`} className="flex items-center justify-between py-2.5 border-b border-dashed last:border-none">
+                      <div className="flex items-center gap-3">
+                         <Badge variant="outline" className="font-mono text-base w-14 h-8 flex items-center justify-center bg-primary text-primary-foreground border-primary">
+                           {/* Use routeId if available, fallback to tripId part */}
+                           {arrival.routeId ? arrival.routeId.replace('Line-', '') : arrival.tripId.substring(0,3)}
                          </Badge>
-                         <span className="text-sm">
-                            {/* Placeholder Destination - replace with actual data */}
-                            Towards Destination {index + 1}
+                         <span className="text-sm font-medium flex-1">
+                            {/* Use headsign if available, fallback */}
+                            {arrival.headsign || `Towards Destination ${index + 1}`}
                          </span>
                       </div>
 
-                     <div className="text-right">
-                        <span className="font-medium text-sm">{formatArrivalTime(arrival.arrivalTime, arrival.delay)}</span>
+                     <div className="text-right flex flex-col items-end">
+                        <span className="font-semibold text-sm tabular-nums">{formatArrivalTime(arrival.arrivalTime, arrival.delay)}</span>
                         {arrival.delay > 60 && (
-                          <span className="ml-1 text-xs text-destructive">
+                          <span className="text-xs text-destructive">
                             ({Math.round(arrival.delay / 60)} min delay)
                           </span>
                         )}
                          {arrival.delay > 0 && arrival.delay <= 60 && (
-                          <span className="ml-1 text-xs text-yellow-600">
+                          <span className="text-xs text-yellow-600">
                             (slight delay)
                           </span>
                         )}
+                        {!arrival.delay && (<span className="text-xs text-muted-foreground">On time</span>)}
                      </div>
 
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-muted-foreground">No upcoming arrivals found.</p>
+                <p className="text-muted-foreground py-4">No upcoming arrivals found for this stop.</p>
               )}
             </ScrollArea>
-            <SheetFooter className="px-4 py-3 border-t bg-background">
+            <SheetFooter className="px-4 py-3 border-t bg-background sticky bottom-0 z-10">
               <div className="flex w-full justify-between gap-2">
                  <Button variant="outline" className="flex-1" onClick={handleSetOrigin}>
                    <MapPin className="mr-2 h-4 w-4" /> Set as Origin
                  </Button>
-                 <Button variant="default" className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground" onClick={handleSetDestination}>
+                 <Button variant="default" className="flex-1 bg-accent hover:bg-accent/90 text-accent-foreground" onClick={handleSetDestination}>
                    <Navigation className="mr-2 h-4 w-4" /> Set as Destination
                  </Button>
               </div>
@@ -180,8 +257,15 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
           </>
         ) : (
           // Loading state for the sheet itself if stop is null initially
-          <div className="flex h-full items-center justify-center">
-             <Skeleton className="h-3/4 w-full" />
+          <div className="flex h-full items-center justify-center p-4">
+             <div className="space-y-3 w-full">
+                  <Skeleton className="h-8 w-3/4" />
+                  <Skeleton className="h-4 w-1/4" />
+                  <Separator />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-full" />
+                  <Skeleton className="h-10 w-5/6" />
+             </div>
           </div>
         )}
       </SheetContent>

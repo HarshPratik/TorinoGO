@@ -1,4 +1,6 @@
 
+import { parseISO } from 'date-fns'; // Import parseISO
+
 /**
  * Represents a GTFS Stop.
  */
@@ -38,16 +40,20 @@ export interface Location {
 // --- Dummy Data Simulation ---
 
 const allDummyStops: GTFSStop[] = [
-  { stopId: 'GTT-1501', stopName: 'Porta Nuova', stopLat: 45.063, stopLon: 7.679 },
-  { stopId: 'GTT-1502', stopName: 'Vittorio Emanuele II', stopLat: 45.067, stopLon: 7.683 },
-  { stopId: 'GTT-244', stopName: 'Massimo D\'Azeglio', stopLat: 45.056, stopLon: 7.687 },
-  { stopId: 'GTT-591', stopName: 'Porta Susa', stopLat: 45.071, stopLon: 7.664 },
-  { stopId: 'GTT-472', stopName: 'Bertola', stopLat: 45.072, stopLon: 7.683 },
-  { stopId: 'GTT-342', stopName: 'Solferino', stopLat: 45.068, stopLon: 7.675 },
-  { stopId: 'GTT-765', stopName: 'Statuto', stopLat: 45.079, stopLon: 7.671 },
-  { stopId: 'GTT-205', stopName: 'Castello', stopLat: 45.071, stopLon: 7.686 },
-  { stopId: 'GTT-2780', stopName: 'Carducci Molinette', stopLat: 45.045, stopLon: 7.677 },
-  // Add more stops representative of Turin
+  { stopId: 'GTT-1501', stopName: 'Porta Nuova Station', stopLat: 45.0630, stopLon: 7.6790 },
+  { stopId: 'GTT-1502', stopName: 'Vittorio Emanuele II', stopLat: 45.0672, stopLon: 7.6835 },
+  { stopId: 'GTT-244', stopName: 'Massimo D\'Azeglio', stopLat: 45.0560, stopLon: 7.6870 },
+  { stopId: 'GTT-591', stopName: 'Porta Susa Station', stopLat: 45.0715, stopLon: 7.6640 },
+  { stopId: 'GTT-472', stopName: 'Bertola', stopLat: 45.0720, stopLon: 7.6830 },
+  { stopId: 'GTT-342', stopName: 'Solferino', stopLat: 45.0680, stopLon: 7.6750 },
+  { stopId: 'GTT-765', stopName: 'Statuto Nord', stopLat: 45.0790, stopLon: 7.6710 },
+  { stopId: 'GTT-205', stopName: 'Castello', stopLat: 45.0710, stopLon: 7.6860 },
+  { stopId: 'GTT-2780', stopName: 'Carducci Molinette', stopLat: 45.0455, stopLon: 7.6775 },
+  { stopId: 'GTT-123', stopName: 'Politecnico', stopLat: 45.0628, stopLon: 7.6612 },
+  { stopId: 'GTT-456', stopName: 'Vinzaaglio', stopLat: 45.0695, stopLon: 7.6688 },
+  { stopId: 'GTT-789', stopName: 'Re Umberto', stopLat: 45.0655, stopLon: 7.6760 },
+  { stopId: 'GTT-1011', stopName: 'San Carlo', stopLat: 45.0690, stopLon: 7.6845 },
+  { stopId: 'GTT-1213', stopName: 'Gran Madre', stopLat: 45.0635, stopLon: 7.6950 },
 ];
 
 /**
@@ -83,6 +89,13 @@ export async function getNearbyStops(location: Location, radius: number): Promis
   // Simulate API call delay
   await new Promise(resolve => setTimeout(resolve, 300 + Math.random() * 500));
 
+  // Simulate potential API failure
+  if (Math.random() < 0.05) { // 5% chance of failure
+      console.error("Simulated API error fetching nearby stops.");
+      throw new Error("Simulated network error fetching stops.");
+  }
+
+
   const nearby = allDummyStops.filter(stop => {
     const distance = calculateDistance(location, { lat: stop.stopLat, lng: stop.stopLon });
     return distance <= radius;
@@ -91,6 +104,20 @@ export async function getNearbyStops(location: Location, radius: number): Promis
   console.log(`Found ${nearby.length} stops nearby (simulated).`);
   return nearby;
 }
+
+
+const realisticHeadsigns: { [key: string]: string[] } = {
+    '4': ['Falchera', 'Strada del Drosso'],
+    '10': ['Via Massari', 'Piazza Statuto'],
+    '13': ['Piazza Gran Madre', 'Piazza Campanella'],
+    '15': ['Sassi Superga', 'Via Brissogne'],
+    '16': ['Piazza Sabotino Circolare Destra', 'Piazza Sabotino Circolare Sinistra'],
+    '18': ['Piazzale Caio Mario', 'Piazza Sofia'],
+    '55': ['Grosso Capolinea', 'Piazza Farini'],
+    '68': ['Via Frejus', 'Corso Casale'],
+    // Add more lines and typical destinations
+};
+
 
 /**
  * Retrieves real-time arrival information for a given stop.
@@ -103,36 +130,63 @@ export async function getRealTimeArrivals(stopId: string): Promise<RealTimeArriv
    // Simulate API call delay
    await new Promise(resolve => setTimeout(resolve, 400 + Math.random() * 600));
 
+    // Simulate potential API failure
+    if (Math.random() < 0.1) { // 10% chance of failure
+        console.error("Simulated API error fetching real-time arrivals.");
+        throw new Error("Simulated network error fetching arrivals.");
+    }
+
    const now = new Date();
    const arrivals: RealTimeArrival[] = [];
-   const numberOfArrivals = Math.floor(Math.random() * 5) + 2; // 2 to 6 arrivals
+   // Generate a more realistic number of arrivals, maybe based on stop popularity?
+   const numberOfLines = Math.floor(Math.random() * 4) + 1; // 1 to 4 different lines serve the stop
 
-   for (let i = 0; i < numberOfArrivals; i++) {
-     const minutesUntilArrival = Math.floor(Math.random() * 25) + 2; // 2 to 26 minutes
-     const delaySeconds = Math.random() > 0.7 ? Math.floor(Math.random() * 300) : 0; // ~30% chance of delay up to 5 mins
-     const arrivalTime = new Date(now.getTime() + minutesUntilArrival * 60000 - delaySeconds * 1000);
+   for (let lineIdx = 0; lineIdx < numberOfLines; lineIdx++) {
+        const lineKeys = Object.keys(realisticHeadsigns);
+        const randomLineKey = lineKeys[Math.floor(Math.random() * lineKeys.length)];
+        const possibleHeadsigns = realisticHeadsigns[randomLineKey] || [`Destination ${lineIdx+1}A`, `Destination ${lineIdx+1}B`];
 
-     arrivals.push({
-       tripId: `Trip-${stopId.substring(4)}-${i}`, // Example trip ID
-       routeId: `Line-${Math.floor(Math.random() * 20) + 1}`, // Example route ID
-       arrivalTime: arrivalTime.toISOString(),
-       delay: delaySeconds,
-       headsign: `Direction ${String.fromCharCode(65 + i)}` // Example Headsign
-     });
+        const numberOfArrivalsForLine = Math.floor(Math.random() * 3) + 1; // 1 to 3 arrivals per line
+
+        for (let i = 0; i < numberOfArrivalsForLine; i++) {
+            // More realistic arrival time distribution
+            const minutesUntilArrival = (i * (Math.random() * 10 + 8)) + (Math.random() * 5 + 2); // Base + Jitter + Offset per arrival
+            const delaySeconds = Math.random() > 0.7 ? Math.floor(Math.random() * 180) - 30 : 0; // ~30% chance of delay/early up to 3 mins
+            const arrivalTime = new Date(now.getTime() + minutesUntilArrival * 60000 - delaySeconds * 1000);
+
+            // Ensure arrival time is in the future for simulation simplicity unless it's very close
+             if (arrivalTime < now && minutesUntilArrival > 1) continue; // Skip arrivals too far in past
+
+            const headsign = possibleHeadsigns[Math.floor(Math.random() * possibleHeadsigns.length)];
+
+            arrivals.push({
+                tripId: `Trip-${stopId.substring(4)}-${lineIdx}-${i}-${Date.now()}`, // More unique trip ID
+                routeId: `Line-${randomLineKey}`, // Use realistic line key
+                arrivalTime: arrivalTime.toISOString(),
+                delay: delaySeconds,
+                headsign: headsign
+            });
+        }
    }
+
 
    console.log(`Generated ${arrivals.length} dummy arrivals for ${stopId}.`);
    // Sort arrivals by estimated time before returning
    arrivals.sort((a, b) => {
-        const timeA = new Date(parseISO(a.arrivalTime).getTime() + a.delay * 1000);
-        const timeB = new Date(parseISO(b.arrivalTime).getTime() + b.delay * 1000);
-        return timeA.getTime() - timeB.getTime();
+       try {
+           const timeA = new Date(parseISO(a.arrivalTime).getTime() + a.delay * 1000);
+           const timeB = new Date(parseISO(b.arrivalTime).getTime() + b.delay * 1000);
+           // Handle potential NaN results from date parsing
+           if (isNaN(timeA.getTime())) return 1;
+           if (isNaN(timeB.getTime())) return -1;
+           return timeA.getTime() - timeB.getTime();
+       } catch (e) {
+            console.error("Error parsing date during sort:", e);
+            return 0; // Keep order if error occurs
+       }
     });
    return arrivals;
  }
-
- // Need to import parseISO from date-fns if not already done globally
- import { parseISO } from 'date-fns';
 
 
 /**
