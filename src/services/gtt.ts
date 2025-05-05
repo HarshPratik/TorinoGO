@@ -1,3 +1,4 @@
+
 /**
  * Represents a GTFS Stop.
  */
@@ -6,31 +7,6 @@ export interface GTFSStop {
   stopName: string;
   stopLat: number;
   stopLon: number;
-  // Optional: Add stopCode if available and useful
-  // stopCode?: string;
-  // Optional: Add locationType (0 for Stop, 1 for Station) if needed
-  // locationType?: number;
-}
-
-/**
- * Represents a GTFS Route.
- */
-export interface GTFSRoute {
-  routeId: string;
-  routeShortName: string;
-  routeLongName: string;
-  routeType: number; // e.g., 3 for bus, 0 for tram, 1 for metro
-  routeColor: string;
-}
-
-/**
- * Represents a GTFS Trip.
- */
-export interface GTFSTrip {
-  tripId: string;
-  routeId: string;
-  serviceId: string;
-  tripHeadsign: string;
 }
 
 /**
@@ -74,9 +50,14 @@ const allDummyStops: GTFSStop[] = [
   // Add more stops representative of Turin
 ];
 
-// Helper to calculate distance (simplified Haversine)
-function calculateDistance(loc1: Location, loc2: Location): number {
-  const R = 6371e3; // metres
+/**
+ * Calculates the distance between two geographical points using the Haversine formula.
+ * @param loc1 The first location.
+ * @param loc2 The second location.
+ * @returns The distance in meters.
+ */
+export function calculateDistance(loc1: Location, loc2: Location): number {
+  const R = 6371e3; // Earth radius in metres
   const φ1 = loc1.lat * Math.PI/180; // φ, λ in radians
   const φ2 = loc2.lat * Math.PI/180;
   const Δφ = (loc2.lat-loc1.lat) * Math.PI/180;
@@ -141,8 +122,17 @@ export async function getRealTimeArrivals(stopId: string): Promise<RealTimeArriv
    }
 
    console.log(`Generated ${arrivals.length} dummy arrivals for ${stopId}.`);
+   // Sort arrivals by estimated time before returning
+   arrivals.sort((a, b) => {
+        const timeA = new Date(parseISO(a.arrivalTime).getTime() + a.delay * 1000);
+        const timeB = new Date(parseISO(b.arrivalTime).getTime() + b.delay * 1000);
+        return timeA.getTime() - timeB.getTime();
+    });
    return arrivals;
  }
+
+ // Need to import parseISO from date-fns if not already done globally
+ import { parseISO } from 'date-fns';
 
 
 /**
