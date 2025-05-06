@@ -204,10 +204,57 @@ export async function findRoutes(
   originLon: number,
   destinationLat: number,
   destinationLon: number
-): Promise<any> {
-  console.warn('findRoutes function is not implemented.');
-  // Simulate API call delay for consistency
+): Promise<any[]> {
+  // Simulate route calculation between two stops
   await new Promise(resolve => setTimeout(resolve, 500));
-  // In a real implementation, this would call a routing engine (e.g., OpenTripPlanner)
-  return [];
+  // Return mock route data for demonstration
+  return [
+    {
+      summary: "Direct route",
+      steps: [
+        {
+          type: "walk",
+          from: { lat: originLat, lon: originLon },
+          to: { lat: originLat, lon: originLon },
+          description: "Walk to the stop."
+        },
+        {
+          type: "bus",
+          line: "11",
+          from: { lat: originLat, lon: originLon },
+          to: { lat: destinationLat, lon: destinationLon },
+          description: "Take bus 11 directly to your destination."
+        }
+      ],
+      duration: 22,
+      transfers: 0
+    },
+    {
+      summary: "1 transfer",
+      steps: [
+        {
+          type: "walk",
+          from: { lat: originLat, lon: originLon },
+          to: { lat: originLat, lon: originLon },
+          description: "Walk to the stop."
+        },
+        {
+          type: "bus",
+          line: "15",
+          from: { lat: originLat, lon: originLon },
+          to: { lat: 45.0703, lon: 7.6869 },
+          description: "Take bus 15 to Porta Nuova."
+        },
+        {
+          type: "tram",
+          line: "4",
+          from: { lat: 45.0703, lon: 7.6869 },
+          to: { lat: destinationLat, lon: destinationLon },
+          description: "Transfer to tram 4 to your destination."
+        }
+      ],
+      duration: 35,
+      transfers: 1
+    }
+  ];
 }

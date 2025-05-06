@@ -1,5 +1,4 @@
-
-'use client'; // Required for Leaflet hooks and event handlers
+'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -10,74 +9,50 @@ import {
   useMap,
   useMapEvents,
 } from 'react-leaflet';
-import type { Map as LeafletMap } from 'leaflet'; // Import Leaflet's Map type
-import L from 'leaflet'; // Import Leaflet library
+import type { Map as LeafletMap } from 'leaflet';
+import L from 'leaflet';
 import type { GTFSStop, Location } from '@/services/gtt';
-import { getNearbyStops, calculateDistance, getRealTimeArrivals } from '@/services/gtt'; // Use calculateDistance from gtt
+import { getNearbyStops, calculateDistance, getRealTimeArrivals } from '@/services/gtt';
 import { Button } from '@/components/ui/button';
 import { LocateFixed, Bus } from 'lucide-react';
 import { StopDetailSheet } from '@/components/stop-detail-sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from "@/hooks/use-toast";
 
-
-// Turin center coordinates
-const DEFAULT_CENTER: L.LatLngExpression = [45.0703, 7.6869]; // Use Leaflet's LatLngExpression
+// Constants
+const DEFAULT_CENTER: L.LatLngExpression = [45.0703, 7.6869]; // Turin center coordinates
 const DEFAULT_ZOOM = 14;
 const NEARBY_RADIUS_METERS = 1000; // Fetch stops within 1km
 
-// Removed global icon modification - explicit icons are used for markers below.
-
-
-// Inner component to access map instance via hooks
-function MapEvents({ onCenterChange, onZoomChange }: { onCenterChange: (center: L.LatLng) => void, onZoomChange: (zoom: number) => void }) {
-  const map = useMapEvents({
-    dragend: () => {
-      onCenterChange(map.getCenter());
-    },
-    zoomend: () => {
-      const center = map.getCenter();
-      const zoom = map.getZoom();
-      onCenterChange(center); // Update center when zoom changes too
-      onZoomChange(zoom);
-    },
-     // Initial load event
-    load: () => {
-        onCenterChange(map.getCenter());
-        onZoomChange(map.getZoom());
-    },
+// Configure Leaflet only on the client side
+if (typeof window !== 'undefined') {
+  // Set up default icons to avoid path issues in Next.js
+  L.Icon.Default.mergeOptions({
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
+    iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
   });
-  return null;
 }
-
-// Inner component to allow controlling map view
-function MapController({ center, zoom }: { center: L.LatLngExpression, zoom: number }) {
-    const map = useMap();
-    useEffect(() => {
-        if (center) {
-            // Use flyTo for smooth transitions, setView for immediate change
-            map.flyTo(center, zoom, {
-                duration: 0.5 // Adjust duration as needed
-            });
-        }
-    }, [center, zoom, map]);
-    return null;
-}
-
 
 export function MapContainer() {
+  // State hooks
   const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
   const [stops, setStops] = useState<GTFSStop[]>([]);
   const [selectedStop, setSelectedStop] = useState<GTFSStop | null>(null);
-  const [currentCenter, setCurrentCenter] = useState<L.LatLng>(L.latLng(DEFAULT_CENTER[0], DEFAULT_CENTER[1])); // Use L.latLng
+  const [currentCenter, setCurrentCenter] = useState<L.LatLng>(L.latLng(DEFAULT_CENTER[0], DEFAULT_CENTER[1]));
   const [currentZoom, setCurrentZoom] = useState<number>(DEFAULT_ZOOM);
-  const [loadingStops, setLoadingStops] = useState(true); // Start loading initially
+  const [loadingStops, setLoadingStops] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
-  const [isMapReady, setIsMapReady] = useState(false); // Track Leaflet map instance readiness
-  const [hasFetchedInitialStops, setHasFetchedInitialStops] = useState(false); // Track initial fetch
-
-  const mapRef = useRef<LeafletMap>(null); // Ref to access map instance if needed
+  const [isMapReady, setIsMapReady] = useState(false);
+  const [hasFetchedInitialStops, setHasFetchedInitialStops] = useState(false);
+  
+  // Create a unique ID for this map instance to prevent initialization conflicts
+  const mapId = useRef(`map-${Date.now()}`).current;
+  const mapRef = useRef<LeafletMap | null>(null);
+  
+  // Track if this component is mounted to prevent state updates after unmount
+  const isMounted = useRef(true);
   const { toast } = useToast();
 
   // Get user's current location
@@ -260,6 +235,50 @@ export function MapContainer() {
        // Setting initial view might be redundant due to MapController, but safe fallback
        // mapInstance.setView(currentCenter, currentZoom);
    };
+   
+   // First effect: Mark component as unmounted when it's destroyed
+   useEffect(() => {
+       return () => {
+           // Set mounted flag to false when component unmounts
+           isMounted.current = false;
+       };
+   }, []);
+   
+   // Second effect: Handle map cleanup separately
+   useEffect(() => {
+       // Return cleanup function
+       return () => {
+           if (mapRef.current) {
+               console.log("Cleaning up map instance");
+               
+               try {
+                   // Remove event listeners
+                   if (typeof mapRef.current.off === 'function') {
+                       mapRef.current.off();
+                   }
+                   
+                   // Remove all layers
+                   if (typeof mapRef.current.eachLayer === 'function') {
+                       mapRef.current.eachLayer((layer) => {
+                           if (mapRef.current) {
+                               mapRef.current.removeLayer(layer);
+                           }
+                       });
+                   }
+                   
+                   // Explicitly remove the map
+                   if (typeof mapRef.current.remove === 'function') {
+                       mapRef.current.remove();
+                   }
+               } catch (e) {
+                   console.error("Error during map cleanup:", e);
+               } finally {
+                   // Always clear the reference
+                   mapRef.current = null;
+               }
+           }
+       };
+   }, []);
 
 
   // Define user location icon (Blue circle)
@@ -316,19 +335,25 @@ export function MapContainer() {
   }, [stops]); // Re-run ONLY when `stops` array changes
 
 
+  // Only render if we're mounted to prevent memory leaks
+  if (!isMounted.current) {
+    return null;
+  }
+  
   return (
     <div className="relative h-full w-full">
-      {/* Ensure LeafletMapContainer only renders when L is available and component is mounted */}
+      {/* Only render the map on the client side */}
       {typeof window !== 'undefined' && L ? (
           <LeafletMapContainer
-              // Use key to force re-render if center changes drastically? No, use MapController.
-              center={DEFAULT_CENTER} // Initial center, MapController handles updates
-              zoom={DEFAULT_ZOOM} // Initial zoom, MapController handles updates
+              id={mapId} /* Unique ID prevents initialization conflicts */
+              key={mapId} /* Key forces React to create a new instance */
+              center={DEFAULT_CENTER}
+              zoom={DEFAULT_ZOOM}
               style={{ width: '100%', height: '100%' }}
-              whenReady={onMapReady} // Use whenReady which seems more reliable than whenCreated
-              className="z-0" // Ensure map is behind overlays
-              minZoom={12} // Set a minimum zoom level
-              maxZoom={18} // Set a maximum zoom level
+              whenReady={onMapReady}
+              className="z-0"
+              minZoom={12}
+              maxZoom={18}
           >
               {/* Map Controller for setting view */}
               {isMapReady && <MapController center={currentCenter} zoom={currentZoom} />}
@@ -344,10 +369,10 @@ export function MapContainer() {
               {/* User Location Marker */}
               {userLocation && (
                   <Marker
-                      position={userLocation} // Leaflet uses LatLng object
+                      position={userLocation}
                       icon={userLocationIcon}
                       title="Your Location"
-                      zIndexOffset={1000} // Ensure user marker is on top
+                      zIndexOffset={1000}
                   />
               )}
 
@@ -371,7 +396,7 @@ export function MapContainer() {
 
           </LeafletMapContainer>
       ) : (
-          <Skeleton className="h-full w-full" /> // Show skeleton if Leaflet not ready or not mounted yet
+          <Skeleton className="h-full w-full" />
       )}
 
 
@@ -379,10 +404,10 @@ export function MapContainer() {
       <Button
         variant="secondary"
         size="icon"
-        className="absolute bottom-24 right-4 z-[1001] shadow-lg" // Ensure button is above map but below sheet potentially
+        className="absolute bottom-24 right-4 z-[1001] shadow-lg"
         onClick={handleRecenter}
         aria-label="Recenter map on your location"
-        disabled={loadingStops && error?.startsWith("Getting")} // Disable while getting location
+        disabled={loadingStops && error?.startsWith("Getting")}
       >
         <LocateFixed size={20} />
       </Button>
@@ -392,7 +417,6 @@ export function MapContainer() {
         stop={selectedStop}
         isOpen={isSheetOpen}
         onClose={handleSheetClose}
-        // zIndex should be handled by Sheet component itself (portal)
       />
 
         {/* Placeholder for Search Bar & Route Planning */}
@@ -407,4 +431,39 @@ export function MapContainer() {
 
     </div>
   );
+}
+
+// Inner component to access map instance via hooks
+function MapEvents({ onCenterChange, onZoomChange }: { onCenterChange: (center: L.LatLng) => void, onZoomChange: (zoom: number) => void }) {
+  const map = useMapEvents({
+    dragend: () => {
+      onCenterChange(map.getCenter());
+    },
+    zoomend: () => {
+      const center = map.getCenter();
+      const zoom = map.getZoom();
+      onCenterChange(center); // Update center when zoom changes too
+      onZoomChange(zoom);
+    },
+     // Initial load event
+    load: () => {
+        onCenterChange(map.getCenter());
+        onZoomChange(map.getZoom());
+    },
+  });
+  return null;
+}
+
+// Inner component to allow controlling map view
+function MapController({ center, zoom }: { center: L.LatLngExpression, zoom: number }) {
+    const map = useMap();
+    useEffect(() => {
+        if (center) {
+            // Use flyTo for smooth transitions, setView for immediate change
+            map.flyTo(center, zoom, {
+                duration: 0.5 // Adjust duration as needed
+            });
+        }
+    }, [center, zoom, map]);
+    return null;
 }
