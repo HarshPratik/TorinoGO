@@ -34,7 +34,7 @@ if (typeof window !== 'undefined') {
   });
 }
 
-export function MapContainer() {
+export function MapContainer({ routeSteps }: { routeSteps?: any[] }) {
   // State hooks
   const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
   const [stops, setStops] = useState<GTFSStop[]>([]);
@@ -378,6 +378,8 @@ export function MapContainer() {
 
               {/* Stop Markers */}
               {stopMarkers}
+              {/* Route Polylines */}
+              {routePolylines}
 
 
               {/* Loading Indicator */}
@@ -467,3 +469,21 @@ function MapController({ center, zoom }: { center: L.LatLngExpression, zoom: num
     }, [center, zoom, map]);
     return null;
 }
+
+// Add polyline rendering for routeSteps
+const routePolylines = useMemo(() => {
+if (!routeSteps || routeSteps.length === 0) return null;
+return routeSteps.map((step, idx) => {
+const positions = [
+[step.from.lat, step.from.lon],
+[step.to.lat, step.to.lon]
+];
+let color = '#3388ff';
+if (step.type === 'walk') color = '#4ade80';
+if (step.type === 'bus') color = '#f59e42';
+if (step.type === 'tram') color = '#a21caf';
+return (
+<Polyline key={idx} positions={positions} color={color} weight={6} opacity={0.7} />
+);
+});
+}, [routeSteps]);
