@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useMemo, useRef } from 'react';
@@ -9,481 +10,333 @@ import {
   useMap,
   useMapEvents,
 } from 'react-leaflet';
-import type { Map as LeafletMap } from 'leaflet';
-import L from 'leaflet';
-import type { GTFSStop, Location } from '@/services/gtt';
-import { getNearbyStops, calculateDistance, getRealTimeArrivals } from '@/services/gtt';
+import type { Map as LeafletMap, LatLng, LatLngExpression } from 'leaflet';
+import L from 'leaflet'; // Import L for LatLng and Icon types
+import type { GTFSStop } from '@/services/gtt';
+import { getNearbyStops, calculateDistance } from '@/services/gtt';
 import { Button } from '@/components/ui/button';
-import { LocateFixed, Bus } from 'lucide-react';
+import { LocateFixed } from 'lucide-react';
 import { StopDetailSheet } from '@/components/stop-detail-sheet';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from "@/hooks/use-toast";
 
-// Constants
-const DEFAULT_CENTER: L.LatLngExpression = [45.0703, 7.6869]; // Turin center coordinates
-const DEFAULT_ZOOM = 14;
-const NEARBY_RADIUS_METERS = 1000; // Fetch stops within 1km
-
-// Configure Leaflet only on the client side
+// Configure Leaflet default icons (client-side only)
 if (typeof window !== 'undefined') {
-  // Set up default icons to avoid path issues in Next.js
+  delete (L.Icon.Default.prototype as any)._getIconUrl; // Temp fix for a known issue with Next.js/Webpack
   L.Icon.Default.mergeOptions({
-    iconRetinaUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png',
-    iconUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png',
-    shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+    iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
   });
 }
 
-export function MapContainer({ routeSteps }: { routeSteps?: any[] }) {
-  // State hooks
-  const [userLocation, setUserLocation] = useState<L.LatLng | null>(null);
+
+// Constants
+const DEFAULT_CENTER_LATLNG: LatLngExpression = [45.0703, 7.6869]; // Turin center coordinates
+const DEFAULT_ZOOM = 14;
+const NEARBY_RADIUS_METERS = 1000;
+
+
+// Helper component to handle map events
+function MapEvents({ onCenterChange, onZoomChange }: { onCenterChange: (center: LatLng) => void, onZoomChange: (zoom: number) => void }) {
+  const map = useMapEvents({
+    dragend: () => onCenterChange(map.getCenter()),
+    zoomend: () => {
+      const center = map.getCenter();
+      const zoom = map.getZoom();
+      onCenterChange(center); // Update center on zoom too, as it might shift
+      onZoomChange(zoom);
+    },
+    // load: () => { // This can sometimes fire too early or cause multiple initial loads
+    //   onCenterChange(map.getCenter());
+    //   onZoomChange(map.getZoom());
+    // }
+  });
+  return null;
+}
+
+// Helper component to control map view programmatically
+function MapController({ center, zoom }: { center: LatLngExpression, zoom: number }) {
+  const map = useMap();
+  useEffect(() => {
+    if (center) {
+      map.flyTo(center, zoom, { duration: 0.5 });
+    }
+  }, [center, zoom, map]);
+  return null;
+}
+
+export function MapContainer() {
+  const [userLocation, setUserLocation] = useState<LatLng | null>(null);
   const [stops, setStops] = useState<GTFSStop[]>([]);
   const [selectedStop, setSelectedStop] = useState<GTFSStop | null>(null);
-  const [currentCenter, setCurrentCenter] = useState<L.LatLng>(L.latLng(DEFAULT_CENTER[0], DEFAULT_CENTER[1]));
+  const [currentCenter, setCurrentCenter] = useState<LatLng>(L.latLng(DEFAULT_CENTER_LATLNG[0], DEFAULT_CENTER_LATLNG[1]));
   const [currentZoom, setCurrentZoom] = useState<number>(DEFAULT_ZOOM);
   const [loadingStops, setLoadingStops] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [isMapReady, setIsMapReady] = useState(false);
   const [hasFetchedInitialStops, setHasFetchedInitialStops] = useState(false);
-  
-  // Create a unique ID for this map instance to prevent initialization conflicts
-  const mapId = useRef(`map-${Date.now()}`).current;
+
   const mapRef = useRef<LeafletMap | null>(null);
-  
-  // Track if this component is mounted to prevent state updates after unmount
-  const isMounted = useRef(true);
   const { toast } = useToast();
 
-  // Get user's current location
+  // Get user location
   useEffect(() => {
-    let isMounted = true; // Track if component is still mounted
-
+    let isMounted = true;
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           if (!isMounted) return;
-          const location = L.latLng( // Use L.latLng
-            position.coords.latitude,
-            position.coords.longitude
-          );
+          const location = L.latLng(position.coords.latitude, position.coords.longitude);
           setUserLocation(location);
-           if (!hasFetchedInitialStops) { // Only center on user if it's the first load
-               setCurrentCenter(location); // Center map on user location
-               setCurrentZoom(DEFAULT_ZOOM + 2); // Zoom in when location found
-           }
+          // Only update center if it's the first time or user explicitly recenters
+          if (!hasFetchedInitialStops) {
+            setCurrentCenter(location);
+            setCurrentZoom(DEFAULT_ZOOM + 2); // Zoom in closer to user location
+          }
           setError(null);
         },
         (err) => {
-           if (!isMounted) return;
-          console.warn(`ERROR(${err.code}): ${err.message}`);
-          setError('Unable to retrieve location. Showing default view.');
-          // Keep default center if location fails, trigger initial fetch
-           if (!hasFetchedInitialStops) {
-               fetchStops(currentCenter); // Fetch for default center
-           }
+          if (!isMounted) return;
+          console.warn(`Geolocation Error (${err.code}): ${err.message}`);
+          setError('Unable to retrieve your location. Showing default view.');
+          toast({ title: "Location Error", description: "Could not get your location. Displaying default area.", variant: "destructive" });
+           // Fetch stops for default location if geolocation fails
+          if (!hasFetchedInitialStops) fetchStops(currentCenter);
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 } // Increased timeout
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     } else {
       if (!isMounted) return;
       setError('Geolocation is not supported by this browser.');
-      // Keep default center if geolocation not supported, trigger initial fetch
-       if (!hasFetchedInitialStops) {
-           fetchStops(currentCenter); // Fetch for default center
-       }
+      toast({ title: "Geolocation Error", description: "Geolocation not supported. Displaying default area.", variant: "destructive" });
+      // Fetch stops for default location if geolocation not supported
+      if (!hasFetchedInitialStops) fetchStops(currentCenter);
     }
-
-    return () => {
-        isMounted = false; // Cleanup function to set mounted status to false
-    };
+    return () => { isMounted = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run only once on mount
+  }, []); // Run once on mount
 
+  const fetchStops = async (center: LatLng) => {
+    // Ensure mapRef.current is available; isMapReady might not be strictly needed here
+    // if we only care about the center coordinates for the API call.
+    setLoadingStops(true);
+    setError(null);
+    try {
+      const nearbyStops = await getNearbyStops({ lat: center.lat, lng: center.lng }, NEARBY_RADIUS_METERS);
+      setStops(nearbyStops);
+      if (!hasFetchedInitialStops) {
+        setHasFetchedInitialStops(true);
+      }
+    } catch (fetchError) {
+      console.error('Error fetching stops:', fetchError);
+      setError('Failed to load public transport stops.');
+      setStops([]);
+      toast({ title: "Network Error", description: "Failed to load nearby stops. Please try again later.", variant: "destructive" });
+    } finally {
+      setLoadingStops(false);
+    }
+  };
 
-  // Function to fetch stops, can be called manually or by effects
-   const fetchStops = async (center: L.LatLng) => {
-       if (!isMapReady) return; // Don't fetch if map isn't ready
-       console.log(`Fetching stops for center: ${center.lat}, ${center.lng}`);
-       setLoadingStops(true);
-       setError(null);
-       try {
-         const nearbyStops = await getNearbyStops(
-           { lat: center.lat, lng: center.lng }, // Convert L.LatLng back for service
-           NEARBY_RADIUS_METERS
-         );
-         setStops(nearbyStops);
-         if (!hasFetchedInitialStops) {
-             setHasFetchedInitialStops(true); // Mark initial fetch done
-         }
-       } catch (fetchError) {
-         console.error('Error fetching stops:', fetchError);
-         setError('Failed to load public transport stops.');
-         setStops([]); // Clear stops on error
-          toast({
-              title: "Error",
-              description: "Failed to load nearby stops.",
-              variant: "destructive",
-          });
-       } finally {
-         setLoadingStops(false);
-       }
-   };
-
-   // Fetch stops when center changes significantly OR when map becomes ready
-   useEffect(() => {
-       if (isMapReady) {
-            console.log("Map ready or center changed, fetching stops...");
-            fetchStops(currentCenter);
-       }
-       // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, [currentCenter, isMapReady]); // Depend on center and map readiness
-
+  // Fetch stops when currentCenter changes and map is ready (or at least center is defined)
+  useEffect(() => {
+    if (currentCenter && (!hasFetchedInitialStops || isMapReady)) { // Fetch if center is set and either first time or map is ready
+        fetchStops(currentCenter);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCenter, isMapReady]); // Removed hasFetchedInitialStops dependency to allow refetch on map ready if geolocation was slow
 
   const handleMarkerClick = (stop: GTFSStop) => {
     setSelectedStop(stop);
     setIsSheetOpen(true);
-    // Center map on the selected stop marker smoothly
-    if(mapRef.current) {
-        const currentZoomLevel = mapRef.current.getZoom();
-        mapRef.current.flyTo([stop.stopLat, stop.stopLon], Math.max(currentZoomLevel, DEFAULT_ZOOM + 1)); // Zoom in slightly if needed
+    if (mapRef.current) {
+      const currentZoomLevel = mapRef.current.getZoom();
+      mapRef.current.flyTo([stop.stopLat, stop.stopLon], Math.max(currentZoomLevel, DEFAULT_ZOOM + 1));
     }
   };
 
   const handleSheetClose = () => {
     setIsSheetOpen(false);
-    // Delay clearing selectedStop to allow sheet close animation
-    setTimeout(() => {
-      setSelectedStop(null);
-    }, 300);
+    setTimeout(() => setSelectedStop(null), 300); // Delay clearing to allow animation
   };
 
   const handleRecenter = () => {
-     let isMounted = true; // Track mount status for async operation
-
     if (userLocation) {
-       const zoom = Math.max(currentZoom, DEFAULT_ZOOM + 2); // Use current or zoomed-in level
-       setCurrentCenter(userLocation); // This will trigger the useEffect to fly to the location
-       setCurrentZoom(zoom);
+      setCurrentCenter(L.latLng(userLocation.lat, userLocation.lng)); // Use existing L.latLng object
+      setCurrentZoom(Math.max(currentZoom, DEFAULT_ZOOM + 2));
     } else if (navigator.geolocation) {
-      // If user location is null but geolocation is available, try fetching it again
-        setLoadingStops(true); // Show loading indicator while getting location
-        setError("Getting your location...");
+      let isMountedLocate = true;
+      setLoadingStops(true); // Indicate loading
+      setError("Getting your location..."); // User feedback
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          if (!isMounted) return;
-          const location = L.latLng(
-            position.coords.latitude,
-            position.coords.longitude
-          );
+          if (!isMountedLocate) return;
+          const location = L.latLng(position.coords.latitude, position.coords.longitude);
           setUserLocation(location);
           setCurrentCenter(location);
           setCurrentZoom(DEFAULT_ZOOM + 2);
           setError(null);
-          setLoadingStops(false);
+          // setLoadingStops(false); // fetchStops will handle this
         },
         (err) => {
-          if (!isMounted) return;
-          console.warn(`ERROR(${err.code}): ${err.message}`);
-          setError('Unable to retrieve your location.');
-          setLoadingStops(false);
-          toast({
-                title: "Location Error",
-                description: "Could not get your current location.",
-                variant: "destructive",
-           });
+          if (!isMountedLocate) return;
+          setError('Unable to retrieve your location for recenter.');
+          setLoadingStops(false); // Stop loading indicator on error
+          toast({ title: "Location Error", description: "Could not get your current location for recenter.", variant: "destructive" });
         },
-         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
+    } else {
+        toast({ title: "Geolocation Error", description: "Geolocation is not available on this device.", variant: "destructive" });
     }
-      // Cleanup function for the specific async operation
-     // This immediate return might not be standard for Promises but illustrates the concept
-     // A better approach might involve AbortController if the Geolocation API supports it
-     // or managing state more carefully based on mount status.
-     // return () => { isMounted = false; };
   };
 
-   const handleCenterChange = (newCenter: L.LatLng) => {
-       if (!currentCenter) return; // Should not happen after init
+  const handleCenterChange = (newCenter: LatLng) => {
+     // Debounce or threshold check to prevent excessive re-fetches
+    const distance = currentCenter ? calculateDistance({ lat: currentCenter.lat, lng: currentCenter.lng }, { lat: newCenter.lat, lng: newCenter.lng }) : Infinity;
+    // Only update if moved significantly (e.g., > 200 meters)
+    // Or if lat/lng diff is substantial, to catch small pans that are still meaningful
+    const latDiff = currentCenter ? Math.abs(currentCenter.lat - newCenter.lat) : Infinity;
+    const lngDiff = currentCenter ? Math.abs(currentCenter.lng - newCenter.lng) : Infinity;
 
-       const distance = calculateDistance(
-         { lat: currentCenter.lat, lng: currentCenter.lng },
-         { lat: newCenter.lat, lng: newCenter.lng }
-       );
-        console.log(`Map moved by ${distance.toFixed(0)}m`);
-       // Update if map moved more than ~200m to avoid excessive refetches
-       // Also check if the new center is significantly different to avoid updates on tiny drifts
-       const latDiff = Math.abs(currentCenter.lat - newCenter.lat);
-       const lngDiff = Math.abs(currentCenter.lng - newCenter.lng);
-       if (distance > 200 || latDiff > 0.001 || lngDiff > 0.001) {
-            console.log("Significant move detected, updating center state.");
-           setCurrentCenter(newCenter);
-       }
-   };
+    if (distance > 200 || latDiff > 0.001 || lngDiff > 0.001) {
+      setCurrentCenter(newCenter); // This will trigger the useEffect for fetchStops
+    }
+  };
 
-   const handleZoomChange = (newZoom: number) => {
-       setCurrentZoom(newZoom);
-        // Optionally fetch stops on zoom change if desired, but can be noisy
-       // fetchStops(currentCenter);
-   };
+  const handleZoomChange = (newZoom: number) => {
+    setCurrentZoom(newZoom);
+    // Optionally, fetch stops if zoom changes significantly, but map move usually covers this
+    // if (Math.abs(newZoom - currentZoom) > 1) fetchStops(currentCenter);
+  };
 
-   // Set map ready state and store instance
-   const onMapReady = (mapInstance: LeafletMap) => {
-       console.log("Leaflet map instance is ready.");
-       mapRef.current = mapInstance;
-       setIsMapReady(true);
-       // Setting initial view might be redundant due to MapController, but safe fallback
-       // mapInstance.setView(currentCenter, currentZoom);
-   };
-   
-   // First effect: Mark component as unmounted when it's destroyed
-   useEffect(() => {
-       return () => {
-           // Set mounted flag to false when component unmounts
-           isMounted.current = false;
-       };
-   }, []);
-   
-   // Second effect: Handle map cleanup separately
-   useEffect(() => {
-       // Return cleanup function
-       return () => {
-           if (mapRef.current) {
-               console.log("Cleaning up map instance");
-               
-               try {
-                   // Remove event listeners
-                   if (typeof mapRef.current.off === 'function') {
-                       mapRef.current.off();
-                   }
-                   
-                   // Remove all layers
-                   if (typeof mapRef.current.eachLayer === 'function') {
-                       mapRef.current.eachLayer((layer) => {
-                           if (mapRef.current) {
-                               mapRef.current.removeLayer(layer);
-                           }
-                       });
-                   }
-                   
-                   // Explicitly remove the map
-                   if (typeof mapRef.current.remove === 'function') {
-                       mapRef.current.remove();
-                   }
-               } catch (e) {
-                   console.error("Error during map cleanup:", e);
-               } finally {
-                   // Always clear the reference
-                   mapRef.current = null;
-               }
-           }
-       };
-   }, []);
+  const onMapReady = (mapInstance: LeafletMap) => {
+    console.log("Leaflet map instance is ready.");
+    mapRef.current = mapInstance;
+    setIsMapReady(true);
+    // Fetch initial stops for the current center (default or geolocated)
+    // This ensures stops are loaded even if geolocation is slow or fails.
+    if(!hasFetchedInitialStops) {
+        fetchStops(currentCenter);
+    }
+  };
+
+  // Effect for cleaning up the map instance on component unmount
+  useEffect(() => {
+    return () => {
+      if (mapRef.current) {
+        console.log("MapContainer: Component unmounting, attempting to remove map instance.");
+        try {
+          mapRef.current.remove(); // Leaflet's method to clean up the map
+        } catch(e) {
+          console.error("Error removing map instance during unmount:", e);
+          // It's possible the map container was already removed from DOM, causing an error.
+          // This is often a sign of race conditions or improper cleanup order elsewhere if it happens frequently.
+        }
+        mapRef.current = null;
+        setIsMapReady(false);
+      }
+    };
+  }, []); // Empty dependency array means this effect runs once on mount and cleanup on unmount
 
 
-  // Define user location icon (Blue circle)
+  // Custom Icons (ensure these are defined after L is available)
   const userLocationIcon = L.divIcon({
-    html: '<div class="h-4 w-4 rounded-full bg-accent ring-2 ring-white shadow-lg animate-pulse"></div>', // Added pulse animation
-    className: '', // Remove default Leaflet icon styles
-    iconSize: [16, 16],
-    iconAnchor: [8, 8], // Center the icon
+    html: '<div class="h-4 w-4 rounded-full bg-accent ring-2 ring-white shadow-lg animate-pulse"></div>',
+    className: '', iconSize: [16, 16], iconAnchor: [8, 8],
   });
 
-   // Define stop marker icon (Primary color bus)
-    const stopIcon = L.divIcon({
-       html: `<div class="rounded-full bg-primary p-1 shadow-md flex items-center justify-center hover:scale-110 transition-transform">
-                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bus"><path d="M8 6v6"/><path d="M16 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/></svg>
-              </div>`,
-       className: '', // Remove default Leaflet icon styles
-       iconSize: [28, 28], // Slightly larger icon
-       iconAnchor: [14, 14], // Center the larger icon
-       popupAnchor: [0, -14], // Adjust popup position
-     });
+  const stopIcon = L.divIcon({
+    html: `<div class="rounded-full bg-primary p-1 shadow-md flex items-center justify-center hover:scale-110 transition-transform"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bus"><path d="M8 6v6"/><path d="M16 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/></svg></div>`,
+    className: '', iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -14],
+  });
 
-
-  // Memoize markers to avoid unnecessary re-renders ONLY when stops change
   const stopMarkers = useMemo(() => {
-      console.log("Re-rendering stop markers:", stops.length);
-      return stops.map((stop) => (
-          <Marker
-              key={stop.stopId}
-              position={[stop.stopLat, stop.stopLon]}
-              icon={stopIcon}
-              eventHandlers={{
-                  click: () => handleMarkerClick(stop),
-              }}
-              title={stop.stopName} // Tooltip on hover
-          >
-              <Popup minWidth={150}>
-                  <div className="text-sm font-semibold">{stop.stopName}</div>
-                  <div className="text-xs text-muted-foreground mb-1">ID: {stop.stopId}</div>
-                  <Button
-                      variant="link"
-                      size="sm"
-                      className="p-0 h-auto text-xs"
-                      onClick={(e) => {
-                          e.stopPropagation(); // Prevent closing popup immediately
-                          handleMarkerClick(stop);
-                      }}
-                  >
-                      View Arrivals
-                  </Button>
-              </Popup>
-          </Marker>
-      ));
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stops]); // Re-run ONLY when `stops` array changes
+    return stops.map((stop) => (
+      <Marker
+        key={stop.stopId}
+        position={[stop.stopLat, stop.stopLon]}
+        icon={stopIcon}
+        eventHandlers={{ click: () => handleMarkerClick(stop) }}
+        title={stop.stopName}
+      >
+        <Popup minWidth={150}>
+          <div className="text-sm font-semibold">{stop.stopName}</div>
+          <div className="text-xs text-muted-foreground mb-1">ID: {stop.stopId}</div>
+          <Button variant="link" size="sm" className="p-0 h-auto text-xs" onClick={(e) => { e.stopPropagation(); handleMarkerClick(stop); }}>
+            View Arrivals
+          </Button>
+        </Popup>
+      </Marker>
+    ));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stops, stopIcon]); // Added stopIcon to dependencies, though it should be stable
 
-
-  // Only render if we're mounted to prevent memory leaks
-  if (!isMounted.current) {
-    return null;
+  // Conditional rendering for the map
+  // `MapLoader` should already handle client-side only rendering of this component,
+  // but this check is an additional safeguard.
+  if (typeof window === 'undefined' || !L) {
+    return <Skeleton className="h-full w-full" />;
   }
-  
+
   return (
     <div className="relative h-full w-full">
-      {/* Only render the map on the client side */}
-      {typeof window !== 'undefined' && L ? (
-          <LeafletMapContainer
-              id={mapId} /* Unique ID prevents initialization conflicts */
-              key={mapId} /* Key forces React to create a new instance */
-              center={DEFAULT_CENTER}
-              zoom={DEFAULT_ZOOM}
-              style={{ width: '100%', height: '100%' }}
-              whenReady={onMapReady}
-              className="z-0"
-              minZoom={12}
-              maxZoom={18}
-          >
-              {/* Map Controller for setting view */}
-              {isMapReady && <MapController center={currentCenter} zoom={currentZoom} />}
+      <LeafletMapContainer
+          center={DEFAULT_CENTER_LATLNG} // Initial center
+          zoom={DEFAULT_ZOOM}             // Initial zoom
+          style={{ width: '100%', height: '100%' }}
+          whenReady={onMapReady}         // Callback when map is initialized
+          className="z-0"
+          minZoom={12}
+          maxZoom={18}
+          // id="unique-map-id" // if you have multiple maps, ensure unique IDs or let react-leaflet handle it
+      >
+          {isMapReady && mapRef.current && <MapController center={currentCenter} zoom={currentZoom} />}
+          <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {isMapReady && mapRef.current && <MapEvents onCenterChange={handleCenterChange} onZoomChange={handleZoomChange} />}
 
-              <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
+          {userLocation && (
+              <Marker position={userLocation} icon={userLocationIcon} title="Your Location" zIndexOffset={1000} />
+          )}
 
-              {/* Listen to map events */}
-              {isMapReady && <MapEvents onCenterChange={handleCenterChange} onZoomChange={handleZoomChange} />}
+          {stopMarkers}
 
-              {/* User Location Marker */}
-              {userLocation && (
-                  <Marker
-                      position={userLocation}
-                      icon={userLocationIcon}
-                      title="Your Location"
-                      zIndexOffset={1000}
-                  />
-              )}
+          {loadingStops && (
+              <div className="absolute bottom-16 left-1/2 z-[1001] -translate-x-1/2 transform rounded bg-background/80 px-3 py-1 text-xs shadow animate-pulse">
+                  {error && error.startsWith("Getting") ? error : "Loading stops..."}
+              </div>
+          )}
+          {/* Removed explicit error message display as toasts are used now */}
+      </LeafletMapContainer>
 
-              {/* Stop Markers */}
-              {stopMarkers}
-              {/* Route Polylines */}
-              {routePolylines}
-
-
-              {/* Loading Indicator */}
-              {loadingStops && (
-                  <div className="absolute bottom-16 left-1/2 z-[1001] -translate-x-1/2 transform rounded bg-background/80 px-3 py-1 text-xs shadow animate-pulse">
-                      {error && error.startsWith("Getting") ? error : "Loading stops..."}
-                  </div>
-              )}
-
-              {/* Error Message - Handled by Toasts now */}
-              {/* {error && !error.startsWith("Getting") && ( // Don't show location fetching as error
-                  <div className="absolute top-4 left-1/2 z-[1001] -translate-x-1/2 transform rounded bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground shadow-lg">
-                      {error}
-                  </div>
-              )} */}
-
-          </LeafletMapContainer>
-      ) : (
-          <Skeleton className="h-full w-full" />
-      )}
-
-
-      {/* Recenter Button */}
       <Button
         variant="secondary"
         size="icon"
         className="absolute bottom-24 right-4 z-[1001] shadow-lg"
         onClick={handleRecenter}
         aria-label="Recenter map on your location"
-        disabled={loadingStops && error?.startsWith("Getting")}
+        disabled={loadingStops && error?.startsWith("Getting")} // Disable while getting location for recenter
       >
         <LocateFixed size={20} />
       </Button>
 
-       {/* Stop Detail Sheet */}
       <StopDetailSheet
         stop={selectedStop}
         isOpen={isSheetOpen}
         onClose={handleSheetClose}
       />
 
-        {/* Placeholder for Search Bar & Route Planning */}
-        <div className="absolute top-4 left-4 right-4 z-[1001] flex gap-2">
-            <div className="flex-grow rounded-md bg-background p-3 text-muted-foreground shadow-lg text-sm cursor-not-allowed">
-                Search / Route Planning (coming soon)
-            </div>
-            <Button variant="secondary" className="shadow-lg" disabled>
-                Saved
-            </Button>
+      {/* Placeholder for Search/Route Planning and Saved Places */}
+      <div className="absolute top-4 left-4 right-4 z-[1001] flex gap-2">
+        <div className="flex-grow rounded-md bg-background p-3 text-muted-foreground shadow-lg text-sm cursor-not-allowed">
+          Search / Route Planning (coming soon)
         </div>
-
+        <Button variant="secondary" className="shadow-lg" disabled>Saved</Button>
+      </div>
     </div>
   );
 }
-
-// Inner component to access map instance via hooks
-function MapEvents({ onCenterChange, onZoomChange }: { onCenterChange: (center: L.LatLng) => void, onZoomChange: (zoom: number) => void }) {
-  const map = useMapEvents({
-    dragend: () => {
-      onCenterChange(map.getCenter());
-    },
-    zoomend: () => {
-      const center = map.getCenter();
-      const zoom = map.getZoom();
-      onCenterChange(center); // Update center when zoom changes too
-      onZoomChange(zoom);
-    },
-     // Initial load event
-    load: () => {
-        onCenterChange(map.getCenter());
-        onZoomChange(map.getZoom());
-    },
-  });
-  return null;
-}
-
-// Inner component to allow controlling map view
-function MapController({ center, zoom }: { center: L.LatLngExpression, zoom: number }) {
-    const map = useMap();
-    useEffect(() => {
-        if (center) {
-            // Use flyTo for smooth transitions, setView for immediate change
-            map.flyTo(center, zoom, {
-                duration: 0.5 // Adjust duration as needed
-            });
-        }
-    }, [center, zoom, map]);
-    return null;
-}
-
-// Add polyline rendering for routeSteps
-const routePolylines = useMemo(() => {
-if (!routeSteps || routeSteps.length === 0) return null;
-return routeSteps.map((step, idx) => {
-const positions = [
-[step.from.lat, step.from.lon],
-[step.to.lat, step.to.lon]
-];
-let color = '#3388ff';
-if (step.type === 'walk') color = '#4ade80';
-if (step.type === 'bus') color = '#f59e42';
-if (step.type === 'tram') color = '#a21caf';
-return (
-<Polyline key={idx} positions={positions} color={color} weight={6} opacity={0.7} />
-);
-});
-}, [routeSteps]);
