@@ -19,7 +19,9 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { formatDistanceToNow, parseISO } from 'date-fns';
-import { useToast } from "@/hooks/use-toast"; // Import useToast
+import { useToast } from "@/hooks/use-toast";
+import { addFavoriteStopId, removeFavoriteStopId, isStopFavorite } from '@/lib/favoritesStorage';
+
 
 interface StopDetailSheetProps {
   stop: GTFSStop | null;
@@ -67,31 +69,27 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
   const [arrivals, setArrivals] = useState<RealTimeArrival[]>([]);
   const [loadingArrivals, setLoadingArrivals] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isFavorite, setIsFavorite] = useState(false); // Placeholder state
-  const { toast } = useToast(); // Get toast function
+  const [isFavorite, setIsFavorite] = useState(false);
+  const { toast } = useToast();
 
   const fetchArrivals = async (showLoading = true) => {
       if (!stop) return;
       if (showLoading) setLoadingArrivals(true);
       setError(null);
-      // Don't clear arrivals immediately for refresh, makes UI jumpy
-      // setArrivals([]);
       try {
         const fetchedArrivals = await getRealTimeArrivals(stop.stopId);
-        // Sort arrivals by estimated time
         fetchedArrivals.sort((a, b) => {
             try {
                 const timeA = new Date(parseISO(a.arrivalTime).getTime() + a.delay * 1000);
                 const timeB = new Date(parseISO(b.arrivalTime).getTime() + b.delay * 1000);
                 return timeA.getTime() - timeB.getTime();
             } catch (e) {
-                // Handle potential invalid dates during sorting
                 console.error("Error parsing date during sort:", e);
-                return 0; // Maintain original order if parsing fails
+                return 0;
             }
         });
         setArrivals(fetchedArrivals);
-        if (!showLoading) { // Only show success toast on manual refresh
+        if (!showLoading) {
              toast({
                title: "Arrivals Updated",
                description: `Fetched latest times for ${stop.stopName}.`,
@@ -100,8 +98,8 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
       } catch (fetchError) {
         console.error('Error fetching real-time arrivals:', fetchError);
         setError('Failed to load real-time arrivals.');
-        setArrivals([]); // Clear arrivals on error
-        toast({ // Show error toast
+        setArrivals([]);
+        toast({
            title: "Error",
            description: "Could not fetch real-time arrivals.",
            variant: "destructive",
@@ -114,27 +112,27 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
 
   useEffect(() => {
     if (isOpen && stop) {
-      fetchArrivals(true); // Fetch with loading indicator on open
-      // TODO: Check if stop is favorite (replace with actual logic later)
-      // This should ideally come from a user data store (e.g., Firebase)
-      // const userFavorites = getUserFavorites(); // Hypothetical function
-      // setIsFavorite(userFavorites.includes(stop.stopId));
-      setIsFavorite(Math.random() > 0.7); // Random demo state
+      fetchArrivals(true);
+      setIsFavorite(isStopFavorite(stop.stopId));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stop, isOpen]); // Rerun when stop changes or sheet opens
+  }, [stop, isOpen]);
 
 
   const handleFavoriteToggle = () => {
-    // TODO: Implement actual favorite saving logic (Firebase)
+    if (!stop) return;
+
     const newFavoriteState = !isFavorite;
+    if (newFavoriteState) {
+      addFavoriteStopId(stop.stopId);
+    } else {
+      removeFavoriteStopId(stop.stopId);
+    }
     setIsFavorite(newFavoriteState);
-    // Simulate saving to backend/local storage
-    console.log('Favorite toggled for stop:', stop?.stopId, newFavoriteState);
-    // Add toast notification
-     toast({
+
+    toast({
        title: newFavoriteState ? "Added to Favorites" : "Removed from Favorites",
-       description: `${stop?.stopName} ${newFavoriteState ? 'saved.' : 'removed.'}`,
+       description: `${stop.stopName} ${newFavoriteState ? 'saved.' : 'removed.'}`,
      });
   };
 
@@ -159,7 +157,7 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
   };
 
   const handleRefresh = () => {
-      fetchArrivals(false); // Fetch without main loading indicator, show toast on completion/error
+      fetchArrivals(false);
   };
 
   return (
@@ -213,11 +211,9 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
                     <li key={`${arrival.tripId}-${index}-${arrival.arrivalTime}`} className="flex items-center justify-between py-2.5 border-b border-dashed last:border-none">
                       <div className="flex items-center gap-3">
                          <Badge variant="outline" className="font-mono text-base w-14 h-8 flex items-center justify-center bg-primary text-primary-foreground border-primary">
-                           {/* Use routeId if available, fallback to tripId part */}
                            {arrival.routeId ? arrival.routeId.replace('Line-', '') : arrival.tripId.substring(0,3)}
                          </Badge>
                          <span className="text-sm font-medium flex-1">
-                            {/* Use headsign if available, fallback */}
                             {arrival.headsign || `Towards Destination ${index + 1}`}
                          </span>
                       </div>
@@ -256,7 +252,6 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
             </SheetFooter>
           </>
         ) : (
-          // Loading state for the sheet itself if stop is null initially
           <div className="flex h-full items-center justify-center p-4">
              <div className="space-y-3 w-full">
                   <Skeleton className="h-8 w-3/4" />
@@ -272,3 +267,4 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
     </Sheet>
   );
 }
+
