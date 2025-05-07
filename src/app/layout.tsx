@@ -1,11 +1,11 @@
 
-'use client'; // Keep this if Toaster or other client components are used for web
-
+// Remove 'use client' as it's not strictly needed anymore and allows metadata export.
+// import type { Metadata } from 'next'; // Already imported but commented out below.
+// import { Geist, Geist_Mono } from 'next/font/google';
+import './globals.css';
+import { Toaster } from '@/components/ui/toaster';
 import type { Metadata } from 'next';
-// import { Geist, Geist_Mono } from 'next/font/google'; // Native uses different font loading
-import './globals.css'; // Tailwind globals, may need separate styling for native
-// import 'leaflet/dist/leaflet.css'; // Leaflet CSS, not used in native
-import { Toaster } from '@/components/ui/toaster'; // This Toaster is for web
+
 
 // const geistSans = Geist({
 //   variable: '--font-geist-sans',
@@ -17,18 +17,16 @@ import { Toaster } from '@/components/ui/toaster'; // This Toaster is for web
 //   subsets: ['latin'],
 // });
 
-// export const metadata: Metadata = { // For web
-//   title: 'TorinoGo',
-//   description: 'Turin Transit Tracker',
-// };
+export const metadata: Metadata = { // For web
+  title: 'TorinoGo',
+  description: 'Turin Transit Tracker',
+};
 
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // For native, this layout is not directly used. App.tsx provides the root.
-  // If sharing layout, create a cross-platform component.
   return (
     <html lang="en">
       {/* <body
