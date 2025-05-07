@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { GTFSStop, RealTimeArrival } from '@/services/gtt';
 import { getRealTimeArrivals } from '@/services/gtt';
 import {
@@ -20,13 +20,15 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { useToast } from "@/hooks/use-toast";
-import { addFavoriteStopId, removeFavoriteStopId, isStopFavorite } from '@/lib/favoritesStorage';
+import { addFavoriteStopId, removeFavoriteStopId, isStopFavorite, getFavoriteStopIds } from '@/lib/favoritesStorage';
 
 
 interface StopDetailSheetProps {
   stop: GTFSStop | null;
   isOpen: boolean;
   onClose: () => void;
+  // Add a callback to notify parent about favorite changes
+  onFavoritesChange?: (favoriteStopIds: string[]) => void;
 }
 
 // Helper function to format arrival time relative to now
@@ -65,14 +67,14 @@ const formatArrivalTime = (isoTimeString: string, delaySeconds: number): string 
 };
 
 
-export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps) {
+export function StopDetailSheet({ stop, isOpen, onClose, onFavoritesChange }: StopDetailSheetProps) {
   const [arrivals, setArrivals] = useState<RealTimeArrival[]>([]);
   const [loadingArrivals, setLoadingArrivals] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isFavorite, setIsFavorite] = useState(false);
+  const [isFav, setIsFav] = useState(false); // Renamed to avoid conflict
   const { toast } = useToast();
 
-  const fetchArrivals = async (showLoading = true) => {
+  const fetchArrivals = useCallback(async (showLoading = true) => {
       if (!stop) return;
       if (showLoading) setLoadingArrivals(true);
       setError(null);
@@ -107,33 +109,37 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
       } finally {
         if (showLoading) setLoadingArrivals(false);
       }
-    };
+    }, [stop, toast]); // Added toast to dependencies
 
 
   useEffect(() => {
     if (isOpen && stop) {
       fetchArrivals(true);
-      setIsFavorite(isStopFavorite(stop.stopId));
+      setIsFav(isStopFavorite(stop.stopId));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stop, isOpen]);
+  }, [stop, isOpen, fetchArrivals]);
 
 
   const handleFavoriteToggle = () => {
     if (!stop) return;
 
-    const newFavoriteState = !isFavorite;
+    const newFavoriteState = !isFav;
     if (newFavoriteState) {
       addFavoriteStopId(stop.stopId);
     } else {
       removeFavoriteStopId(stop.stopId);
     }
-    setIsFavorite(newFavoriteState);
+    setIsFav(newFavoriteState);
 
     toast({
        title: newFavoriteState ? "Added to Favorites" : "Removed from Favorites",
        description: `${stop.stopName} ${newFavoriteState ? 'saved.' : 'removed.'}`,
      });
+
+    // Notify parent about the change
+    if (onFavoritesChange) {
+        onFavoritesChange(getFavoriteStopIds());
+    }
   };
 
   const handleSetOrigin = () => {
@@ -183,13 +189,13 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
                          <RefreshCw size={18} className={loadingArrivals ? 'animate-spin' : ''} />
                      </Button>
                      <Button
-                         variant={isFavorite ? "secondary" : "ghost"}
+                         variant={isFav ? "secondary" : "ghost"} // Use isFav here
                          size="icon"
                          onClick={handleFavoriteToggle}
-                         className={`transition-colors ${isFavorite ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
-                         aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+                         className={`transition-colors ${isFav ? 'text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+                         aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}
                      >
-                         <Star fill={isFavorite ? "currentColor" : "none"} size={20} />
+                         <Star fill={isFav ? "currentColor" : "none"} size={20} />
                      </Button>
                    </div>
               </div>
@@ -267,4 +273,3 @@ export function StopDetailSheet({ stop, isOpen, onClose }: StopDetailSheetProps)
     </Sheet>
   );
 }
-

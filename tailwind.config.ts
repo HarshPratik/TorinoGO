@@ -1,11 +1,14 @@
+
 import type { Config } from "tailwindcss";
 
 export default {
     darkMode: ["class"],
     content: [
-    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}", // For Next.js web pages if any
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}", // For web components
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}", // For Next.js App Router
+    // Note: Tailwind CSS is not directly used for React Native styling in this setup.
+    // Native styling is in src/styles/nativeStyles.ts or inline.
   ],
   theme: {
   	extend: {

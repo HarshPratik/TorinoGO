@@ -1,3 +1,4 @@
+
 {
   "compilerOptions": {
     "target": "ES2017",
@@ -8,20 +9,29 @@
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
-    "moduleResolution": "bundler",
+    "moduleResolution": "bundler", // or "node" if bundler causes issues with RN
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-native", // Changed for React Native
     "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    // "plugins": [ // Next.js specific, remove or conditionalize if only building native
+    //   {
+    //     "name": "next"
+    //   }
+    // ],
+    "baseUrl": ".", // Ensure baseUrl is set for paths to work correctly
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    "typeRoots": ["./node_modules/@types", "./src/types"] // Include custom types if any
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    // "next-env.d.ts", // Next.js specific, remove if only building native
+    "**/*.ts",
+    "**/*.tsx",
+    // ".next/types/**/*.ts" // Next.js specific, remove if only building native
+    "App.tsx" // Include the new App.tsx
+  ],
+  "exclude": ["node_modules", ".expo", "babel.config.js", "metro.config.js", "next.config.ts"],
+  "extends": "expo/tsconfig.base"
 }
