@@ -1,5 +1,4 @@
-
-# Firebase Studio / TorinoGo
+TorinoGo
 
 This is a NextJS starter in Firebase Studio, now with an Expo (React Native) version for mobile.
 
