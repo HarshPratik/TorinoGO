@@ -68,3 +68,4 @@ The mobile application is built using Expo. The main entry point is `App.tsx`.
 - Connect to real-time data sources.
 - Enhance styling and user experience for native platforms.
 - Further develop the "Saved Places" feature.
+- Further improvements needed.
